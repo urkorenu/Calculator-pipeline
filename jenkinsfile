@@ -1,0 +1,60 @@
+pipeline {
+    agent any
+
+    tools {
+        maven 'my-maven'
+        jfrog 'jfrog-cli'
+    }
+
+    environment {
+        SONARQUBE_PROJECT_KEY = 'calculator-inspector'
+        SONARQUBE_PROJECT_NAME = 'calculator inspector'
+        ARTIFACTORY_TARGET_PATH = 'calculator-java/'
+        ARTIFACTORY_CREDENTIALS = credentials('calculator-artifactory')
+    }
+
+    stages {
+        stage("Clone Git Repository") {
+            steps {
+                updateGitlabCommitStatus name: 'build', state: 'pending'
+                cleanWs()
+                checkout scmGit(
+                    branches: [[name: 'dev']],
+                    extensions: [],
+                    userRemoteConfigs: [[credentialsId: 'git-cred', url: 'http://51.21.112.83/do19/calculator']]
+                )
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('SonarQube') { 
+                    sh "${tool('my-maven')}/bin/mvn -DskipTests clean verify sonar:sonar \
+                        -Dsonar.projectKey=${SONARQUBE_PROJECT_KEY} \
+                        -Dsonar.projectName='${SONARQUBE_PROJECT_NAME}'"
+                }
+            }
+        }
+
+        stage('Artifactory') {
+            steps {
+                jf 'rt u target/Calculator-1.0-SNAPSHOT.jar ${ARTIFACTORY_TARGET_PATH} --url http://172.31.24.217:8082/artifactory/ --access-token ${ARTIFACTORY_CREDENTIALS}'
+            }
+        }
+    }
+
+    post {
+        failure {
+              mail to: 'ork14790@gmail.com',
+                subject: "FAILED: Build ${env.JOB_NAME}", 
+                body: "Build failed ${env.JOB_NAME} build no: ${env.BUILD_NUMBER}.\n\nView the log at:\n ${env.BUILD_URL}"
+        }
+    
+        success{
+            mail to: 'ork14790@gmail.com',
+                subject: "SUCCESSFUL: Build ${env.JOB_NAME}", 
+                body: "Build Successful ${env.JOB_NAME} build no: ${env.BUILD_NUMBER}\n\nView the log at:\n ${env.BUILD_URL}"
+        }
+    }
+}
+
